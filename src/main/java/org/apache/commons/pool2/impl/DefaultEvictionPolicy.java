@@ -40,11 +40,19 @@ import org.apache.commons.pool2.PooledObject;
  * @since 2.0
  */
 public class DefaultEvictionPolicy<T> implements EvictionPolicy<T> {
-
+	
+	/**
+	 * <pre>
+	 * 一个对象是否应该被驱逐，取决下面任何一个条件
+	 *	 条件1：softMinEvictableIdleTimeMillis为正数时, 并且当前对象池中空闲的对象数大于minIdle时，那么当前被检测的对象才是应该被驱逐的
+	 *	 条件2：当前的idle对象的idleTimeMills已经超过了minEvictableIdleTimeMillis, 那么当前对象应该被驱逐
+	 * </pre>
+	 */
     @Override
     public boolean evict(final EvictionConfig config, final PooledObject<T> underTest,
             final int idleCount) {
-
+    	
+    	//经过EvictionConfig的转化, getIdleSoftEvictTime已经默认为Long.MAX_VALUE
         if ((config.getIdleSoftEvictTime() < underTest.getIdleTimeMillis() &&
                 config.getMinIdle() < idleCount) ||
                 config.getIdleEvictTime() < underTest.getIdleTimeMillis()) {

@@ -104,6 +104,8 @@ public interface PooledObjectFactory<T> {
   void destroyObject(PooledObject<T> p) throws Exception;
 
   /**
+   * 验证新创建的对象或者返回的对象是否合法(TestOnBorrow & TestOnCreate)
+   * 
    * Ensures that the instance is safe to be returned by the pool.
    *
    * @param p a {@code PooledObject} wrapping the instance to be validated
@@ -114,6 +116,8 @@ public interface PooledObjectFactory<T> {
   boolean validateObject(PooledObject<T> p);
 
   /**
+   * 激活对象，正常情况下，对象被创建后都处于"激活"状态， 可以直接使用，除非你还需要初始化一些其它的资源，才可以使用当前对象
+   * 
    * Reinitialize an instance to be returned by the pool.
    *
    * @param p a {@code PooledObject} wrapping the instance to be activated

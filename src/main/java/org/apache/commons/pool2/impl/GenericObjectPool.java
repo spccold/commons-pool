@@ -111,7 +111,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
             throw new IllegalArgumentException("factory may not be null");
         }
         this.factory = factory;
-
+        //所有的idle objects全部用双向队列管理起来
         idleObjects = new LinkedBlockingDeque<PooledObject<T>>(config.getFairness());
 
         setConfig(config);
@@ -301,22 +301,35 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
      * @see GenericObjectPoolConfig
      */
     public void setConfig(final GenericObjectPoolConfig conf) {
+    	//是否后进先出(返回最近使用的object)， 或者是先进先出
         setLifo(conf.getLifo());
+        //最大空闲对象数量，如果maxIdle为负数，那么空闲数量为Integer.MAX_VALUE
         setMaxIdle(conf.getMaxIdle());
         setMinIdle(conf.getMinIdle());
         setMaxTotal(conf.getMaxTotal());
+        //依赖getBlockWhenExhausted是否开启
         setMaxWaitMillis(conf.getMaxWaitMillis());
+        //没有资源时，需要需要阻塞等待资源的到来，阻塞的时间为maxWaitMillis, 如果maxWaitMillis为负数，那么将一直阻塞到有资源为止
         setBlockWhenExhausted(conf.getBlockWhenExhausted());
+        //是否验证新创建对象的合法性
         setTestOnCreate(conf.getTestOnCreate());
+        //是否验证获取idle对象的合法性
         setTestOnBorrow(conf.getTestOnBorrow());
+        //对象使用完后，在放回idle队列的时候是否检验对象的合法性
         setTestOnReturn(conf.getTestOnReturn());
+        //依赖timeBetweenEvictionRunsMillis是否大于0
         setTestWhileIdle(conf.getTestWhileIdle());
+        //每次evictor被调度到的时候，需要检测多少个处于idle 的object
         setNumTestsPerEvictionRun(conf.getNumTestsPerEvictionRun());
         setMinEvictableIdleTimeMillis(conf.getMinEvictableIdleTimeMillis());
+        //当timeBetweenEvictionRunsMillis大于0时，开启定时evictor
         setTimeBetweenEvictionRunsMillis(
                 conf.getTimeBetweenEvictionRunsMillis());
+        //如果getMinEvictableIdleTimeMillis大于0，softMinEvictableIdleTimeMillis将被忽略
         setSoftMinEvictableIdleTimeMillis(
                 conf.getSoftMinEvictableIdleTimeMillis());
+        //初始化object的驱逐策略, 用户可自定义(需要实现EvictionPolicy), 默认为DefaultEvictionPolicy
+        //evictor在运行时，需要根据EvictionPolicy来驱逐处于idle状态的对象
         setEvictionPolicyClassName(conf.getEvictionPolicyClassName());
         setEvictorShutdownTimeoutMillis(conf.getEvictorShutdownTimeoutMillis());
     }
@@ -429,13 +442,16 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
 
         while (p == null) {
             create = false;
+            //先从空闲对象中取
             p = idleObjects.pollFirst();
             if (p == null) {
+            	//没有空闲对象的话，需要创建新的对象以供使用
                 p = create();
                 if (p != null) {
                     create = true;
                 }
             }
+            //是否需要阻塞等待资源
             if (blockWhenExhausted) {
                 if (p == null) {
                     if (borrowMaxWaitMillis < 0) {
@@ -449,17 +465,19 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
                     throw new NoSuchElementException(
                             "Timeout waiting for idle object");
                 }
-            } else {
+            } else {//否则直接抛出没有资源的异常
                 if (p == null) {
                     throw new NoSuchElementException("Pool exhausted");
                 }
             }
+            //默认使用DefaultPooledObject
             if (!p.allocate()) {
                 p = null;
             }
 
             if (p != null) {
                 try {
+                	//激活对象，正常情况下，对象被创建后都处于"激活"状态， 可以直接使用，除非你还需要初始化一些其它的资源，才可以使用当前对象
                     factory.activateObject(p);
                 } catch (final Exception e) {
                     try {
@@ -475,6 +493,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
                         throw nsee;
                     }
                 }
+                //检查对象是否合法(新创建的对象或者是idle对象)
                 if (p != null && (getTestOnBorrow() || create && getTestOnCreate())) {
                     boolean validate = false;
                     Throwable validationThrowable = null;
@@ -586,6 +605,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
         }
 
         final int maxIdleSave = getMaxIdle();
+        //如果当前idle的object数量已经超过maxIdle，则在return对象的时候直接执行destroy
         if (isClosed() || maxIdleSave > -1 && maxIdleSave <= idleObjects.size()) {
             try {
                 destroy(p);
@@ -594,8 +614,10 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
             }
         } else {
             if (getLifo()) {
+            	//队列头部
                 idleObjects.addFirst(p);
             } else {
+            	//队列尾部
                 idleObjects.addLast(p);
             }
             if (isClosed()) {
@@ -712,6 +734,8 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
     }
 
     /**
+     * 执行驱逐策略
+     * 
      * {@inheritDoc}
      * <p>
      * Successive activations of this method examine objects in sequence,
@@ -721,9 +745,10 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
     public void evict() throws Exception {
         assertOpen();
 
-        if (idleObjects.size() > 0) {
+        if (idleObjects.size() > 0) {//显然驱逐策略是针对所以的idle对象
 
             PooledObject<T> underTest = null;
+            //获取具体的驱逐策略, 用户可自定义， 默认为DefaultEvictionPolicy
             final EvictionPolicy<T> evictionPolicy = getEvictionPolicy();
 
             synchronized (evictionLock) {
@@ -731,9 +756,9 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
                         getMinEvictableIdleTimeMillis(),
                         getSoftMinEvictableIdleTimeMillis(),
                         getMinIdle());
-
+                //是否在evictor运行的时候检测每个对象的可用性
                 final boolean testWhileIdle = getTestWhileIdle();
-
+                //getNumTests()返回被检查的idle object对象数量(取numTestsPerEvictionRun和idleObjects.size()中小的那一个)
                 for (int i = 0, m = getNumTests(); i < m; i++) {
                     if (evictionIterator == null || !evictionIterator.hasNext()) {
                         evictionIterator = new EvictionIterator(idleObjects);
@@ -752,7 +777,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
                         evictionIterator = null;
                         continue;
                     }
-
+                    //可能此时这个idle对象又被另一个线程借出使用了，但此时总的检测数量人需要减1
                     if (!underTest.startEvictionTest()) {
                         // Object was borrowed in another thread
                         // Don't count this as an eviction test so reduce i;
@@ -776,10 +801,12 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
                         evict = false;
                     }
 
-                    if (evict) {
+                    if (evict) {//被驱逐的对象直接被destroy
                         destroy(underTest);
                         destroyedByEvictorCount.incrementAndGet();
                     } else {
+                    	//如果当前被检测的对象不符合被驱逐的条件，那么接着判断是否需要判断当前对象是否还合法
+                    	//先active, 再validate, 然后再passivate, 可以看到testWhileIdle开启后，需要执行较多的action(还好大多数的实现中，activeObject和passivateObject都没做什么事)
                         if (testWhileIdle) {
                             boolean active = false;
                             try {
@@ -832,6 +859,8 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
     }
 
     /**
+     * 确保最多创建maxTotal个Object
+     * 
      * Attempts to create a new wrapped pooled object.
      * <p>
      * If there are {@link #getMaxTotal()} objects already in circulation
@@ -904,6 +933,7 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
         }
 
         createdCount.incrementAndGet();
+        // 存放所以得对象
         allObjects.put(new IdentityWrapper<T>(p.getObject()), p);
         return p;
     }
@@ -1158,6 +1188,8 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
     private final Map<IdentityWrapper<T>, PooledObject<T>> allObjects =
         new ConcurrentHashMap<IdentityWrapper<T>, PooledObject<T>>();
     /*
+     * 已创建和正在创建的对象的总数
+     * 
      * The combined count of the currently created objects and those in the
      * process of being created. Under load, it may exceed {@link #_maxActive}
      * if multiple threads try and create a new object at the same time but
@@ -1165,7 +1197,9 @@ public class GenericObjectPool<T> extends BaseGenericObjectPool<T>
      * {@link #_maxActive} objects created at any one time.
      */
     private final AtomicLong createCount = new AtomicLong(0);
+    //正在创建新对象的线程数量
     private long makeObjectCount = 0;
+    //确保创建新对象的线程安全性
     private final Object makeObjectCountLock = new Object();
     private final LinkedBlockingDeque<PooledObject<T>> idleObjects;
 

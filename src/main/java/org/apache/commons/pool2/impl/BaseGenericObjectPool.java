@@ -69,6 +69,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
             BaseObjectPoolConfig.DEFAULT_BLOCK_WHEN_EXHAUSTED;
     private volatile long maxWaitMillis =
             BaseObjectPoolConfig.DEFAULT_MAX_WAIT_MILLIS;
+    //是否后进先出(返回最近使用的object)， 或者是先进先出
     private volatile boolean lifo = BaseObjectPoolConfig.DEFAULT_LIFO;
     private final boolean fairness;
     private volatile boolean testOnCreate =
@@ -112,6 +113,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
     private final String creationStackTrace;
     private final AtomicLong borrowedCount = new AtomicLong(0);
     private final AtomicLong returnedCount = new AtomicLong(0);
+    //已创建对象的总和
     final AtomicLong createdCount = new AtomicLong(0);
     final AtomicLong destroyedCount = new AtomicLong(0);
     final AtomicLong destroyedByEvictorCount = new AtomicLong(0);
@@ -246,6 +248,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
      * @see #setBlockWhenExhausted
      */
     public final void setMaxWaitMillis(final long maxWaitMillis) {
+    	//依赖getBlockWhenExhausted是否开启
         this.maxWaitMillis = maxWaitMillis;
     }
 
@@ -431,6 +434,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
      * @see #setTimeBetweenEvictionRunsMillis
      */
     public final void setTestWhileIdle(final boolean testWhileIdle) {
+    	//依赖timeBetweenEvictionRunsMillis是否大于0
         this.testWhileIdle = testWhileIdle;
     }
 
@@ -460,6 +464,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
     public final void setTimeBetweenEvictionRunsMillis(
             final long timeBetweenEvictionRunsMillis) {
         this.timeBetweenEvictionRunsMillis = timeBetweenEvictionRunsMillis;
+        //当timeBetweenEvictionRunsMillis大于0时，开启定时evictor
         startEvictor(timeBetweenEvictionRunsMillis);
     }
 
@@ -499,6 +504,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
      * @see #setTimeBetweenEvictionRunsMillis
      */
     public final void setNumTestsPerEvictionRun(final int numTestsPerEvictionRun) {
+    	//每次evictor被调度到的时候，需要检测多少个处于idle 的object
         this.numTestsPerEvictionRun = numTestsPerEvictionRun;
     }
 
@@ -570,10 +576,12 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
      *            before it is eligible for eviction if minIdle instances are
      *            available
      *
-     * @see #getSoftMinEvictableIdleTimeMillis
+     * @see #getSoftMinEvictableIdleTimeMilliss
      */
     public final void setSoftMinEvictableIdleTimeMillis(
             final long softMinEvictableIdleTimeMillis) {
+    	//如果getMinEvictableIdleTimeMillis大于0，softMinEvictableIdleTimeMillis将被忽略
+    	//softMinEvictableIdleTimeMillis和minEvictableIdleTimeMillis类似，但包含了额外的条件(idle对象的数量至少为minIdle个才生效)
         this.softMinEvictableIdleTimeMillis = softMinEvictableIdleTimeMillis;
     }
 
@@ -615,6 +623,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
                 @SuppressWarnings("unchecked") // safe, because we just checked the class
                 final
                 EvictionPolicy<T> evicPolicy = (EvictionPolicy<T>) policy;
+                //初始化object的驱逐策略
                 this.evictionPolicy = evicPolicy;
             } else {
                 throw new IllegalArgumentException("[" + evictionPolicyClassName +
@@ -726,6 +735,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
             }
             if (delay > 0) {
                 evictor = new Evictor();
+                //使用ScheduledThreadPoolExecutor(全局唯一)定时调度任务
                 EvictionTimer.schedule(evictor, delay, delay);
             }
         }
@@ -918,7 +928,8 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
         borrowedCount.incrementAndGet();
         idleTimes.add(p.getIdleTimeMillis());
         waitTimes.add(waitTime);
-
+        
+        //更新获取对象的最大耗时
         // lock-free optimistic-locking maximum
         long currentMax;
         do {
@@ -1067,6 +1078,7 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
 
                 // Evict from the pool
                 try {
+                	//执行驱逐策略
                     evict();
                 } catch(final Exception e) {
                     swallowException(e);
@@ -1174,8 +1186,10 @@ public abstract class BaseGenericObjectPool<T> extends BaseObject {
             this.idleObjects = idleObjects;
 
             if (getLifo()) {
+            	//从队列尾部向队列头部遍历
                 idleObjectIterator = idleObjects.descendingIterator();
             } else {
+            	//从队列头部向队列尾部遍历
                 idleObjectIterator = idleObjects.iterator();
             }
         }

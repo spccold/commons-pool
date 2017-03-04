@@ -42,8 +42,11 @@ public class DefaultPooledObject<T> implements PooledObject<T> {
     private final T object;
     private PooledObjectState state = PooledObjectState.IDLE; // @GuardedBy("this") to ensure transitions are valid
     private final long createTime = System.currentTimeMillis();
+    //最后被借出使用的时间
     private volatile long lastBorrowTime = createTime;
+    //最后被使用的时间，整体上和lastBorrowTime一直(@see use())
     private volatile long lastUseTime = createTime;
+    //最后被返回到对象池的时间
     private volatile long lastReturnTime = createTime;
     private volatile boolean logAbandoned = false;
     private volatile Exception borrowedBy = null;
@@ -81,7 +84,8 @@ public class DefaultPooledObject<T> implements PooledObject<T> {
         }
         return System.currentTimeMillis() - bTime;
     }
-
+    
+    //上次被借出到当前的时间跨度
     @Override
     public long getIdleTimeMillis() {
         final long elapsed = System.currentTimeMillis() - lastReturnTime;
@@ -187,8 +191,9 @@ public class DefaultPooledObject<T> implements PooledObject<T> {
      */
     @Override
     public synchronized boolean allocate() {
-        if (state == PooledObjectState.IDLE) {
+        if (state == PooledObjectState.IDLE) {//初始为idle状态
             state = PooledObjectState.ALLOCATED;
+            //记录一些信息 
             lastBorrowTime = System.currentTimeMillis();
             lastUseTime = lastBorrowTime;
             borrowedCount++;
@@ -207,6 +212,8 @@ public class DefaultPooledObject<T> implements PooledObject<T> {
     }
 
     /**
+     * 在returnObject(T)中被调用
+     * 
      * Deallocates the object and sets it {@link PooledObjectState#IDLE IDLE}
      * if it is currently {@link PooledObjectState#ALLOCATED ALLOCATED}.
      *
@@ -217,6 +224,7 @@ public class DefaultPooledObject<T> implements PooledObject<T> {
         if (state == PooledObjectState.ALLOCATED ||
                 state == PooledObjectState.RETURNING) {
             state = PooledObjectState.IDLE;
+            // returnObject时，记录当前对象最后被返回的时候， 用于计算该对象的idleTimeMills
             lastReturnTime = System.currentTimeMillis();
             borrowedBy = null;
             return true;

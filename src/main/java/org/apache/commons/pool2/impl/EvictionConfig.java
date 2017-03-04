@@ -52,6 +52,7 @@ public class EvictionConfig {
         } else {
             idleEvictTime = Long.MAX_VALUE;
         }
+        //poolIdleSoftEvictTime默认为-1
         if (poolIdleSoftEvictTime > 0) {
             idleSoftEvictTime = poolIdleSoftEvictTime;
         } else {
